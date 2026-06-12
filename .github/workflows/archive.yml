@@ -1,0 +1,63 @@
+# Hourly chain archiver. Checks out two repos — self (data), BrowserCoin (code)
+# — and runs server/tools/archive.ts, which fetches new blocks from the public
+# API helpers, validates every one with the real consensus code (including
+# Argon2id PoW), and appends them to the chunked archive. Pull-based on
+# purpose: the chain servers hold no credentials for this repo.
+name: Archive chain
+
+on:
+  schedule:
+    # Hourly, off the top-of-hour rush. The archiver lags the live tip by
+    # 60 confirmations (~2.5 h) so archived chunks never need rewriting.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout archive (data)
+        uses: actions/checkout@v4
+
+      - name: Checkout BrowserCoin (code)
+        uses: actions/checkout@v4
+        with:
+          repository: swompythesecond/BrowserCoin
+          path: code
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: code/package-lock.json
+
+      - name: Install dependencies
+        working-directory: code
+        run: npm ci
+
+      - name: Run archiver
+        working-directory: code
+        run: npx tsx server/tools/archive.ts --out "$GITHUB_WORKSPACE"
+
+      - name: Commit and push
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No new blocks to archive."
+            exit 0
+          fi
+          git config user.name "browsercoin-archive[bot]"
+          git config user.email "actions@users.noreply.github.com"
+          MSG=$(cat commit-message.txt 2>/dev/null || echo "archive: update")
+          git commit -m "$MSG"
+          git pull --rebase
+          git push

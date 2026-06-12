@@ -1,0 +1,5 @@
+# BrowserCoin source checkout made by the archive workflow (data repo only).
+/code/
+
+# Per-run commit message written by server/tools/archive.ts.
+/commit-message.txt

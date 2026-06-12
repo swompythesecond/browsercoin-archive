@@ -1,0 +1,40 @@
+# Monthly full-chain snapshot release: one gzipped chain-9000.json anyone can
+# grab to stand up a helper server without cloning the repo or assembling
+# chunks. Releases also survive independently of git history rewrites.
+name: Monthly snapshot release
+
+on:
+  schedule:
+    - cron: '43 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build chain file
+        run: |
+          node tools/build-chain-json.mjs --out chain-9000.json
+          gzip -9 chain-9000.json
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MANIFEST=$(ls */manifest.json | head -1)
+          NETWORK=$(jq -r .chainVersion "$MANIFEST")
+          HEIGHT=$(jq -r .archivedHeight "$MANIFEST")
+          TAG="snapshot-${NETWORK}-h${HEIGHT}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists (no new blocks since last run)."
+            exit 0
+          fi
+          gh release create "$TAG" chain-9000.json.gz \
+            --title "Chain snapshot — $NETWORK, height $HEIGHT" \
+            --notes "Full validated chain through height $HEIGHT. Gunzip and place next to server/api.ts as chain-9000.json to restore a helper server; every block is re-verified on load, so no trust in this archive is required."
